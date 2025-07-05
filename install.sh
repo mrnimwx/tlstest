@@ -1,84 +1,89 @@
 #!/bin/bash
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Throughput Tester Installation Script
+# Auto-detects SSL certificates and installs the service
 
-echo -e "${BLUE}🚀 Throughput Tester Installation Script${NC}"
+echo "🚀 Throughput Tester Installation Script"
 echo "==========================================="
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}❌ Please run as root (use sudo)${NC}"
+if [[ $EUID -ne 0 ]]; then
+   echo "❌ This script must be run as root"
+   exit 1
+fi
+
+# Auto-detect domain from certificate directory
+DOMAIN=""
+if [ -d "/root/cert" ]; then
+    for cert_dir in /root/cert/*/; do
+        if [ -d "$cert_dir" ]; then
+            domain_name=$(basename "$cert_dir")
+            if [ -f "$cert_dir/fullchain.pem" ] && [ -f "$cert_dir/privkey.pem" ]; then
+                DOMAIN="$domain_name"
+                echo "✅ Found domain: $DOMAIN"
+                break
+            fi
+        fi
+    done
+fi
+
+if [ -z "$DOMAIN" ]; then
+    echo "❌ No valid SSL certificates found in /root/cert/"
+    echo "Please ensure your certificates are in /root/cert/yourdomain.com/ format"
     exit 1
 fi
 
-# Check if certificate directory exists
-if [ ! -d "/root/cert" ]; then
-    echo -e "${RED}❌ Certificate directory /root/cert not found${NC}"
-    echo -e "${YELLOW}💡 Please ensure your SSL certificates are in /root/cert/your-domain/fullchain.pem and privkey.pem${NC}"
+# Create temporary directory for downloads
+TEMP_DIR="/tmp/tlstest-install"
+rm -rf "$TEMP_DIR"
+mkdir -p "$TEMP_DIR"
+cd "$TEMP_DIR"
+
+echo "📁 Downloading files..."
+
+# Download all required files from GitHub
+curl -sSL "https://raw.githubusercontent.com/mrnimwx/tlstest/main/throughput_test.py" -o throughput_test.py
+curl -sSL "https://raw.githubusercontent.com/mrnimwx/tlstest/main/throughput-test.service" -o throughput-test.service
+
+# Check if downloads were successful
+if [ ! -f "throughput_test.py" ] || [ ! -f "throughput-test.service" ]; then
+    echo "❌ Failed to download required files"
     exit 1
 fi
 
-# Find domains
-DOMAINS=$(find /root/cert -maxdepth 1 -type d ! -path /root/cert | wc -l)
-if [ "$DOMAINS" -eq 0 ]; then
-    echo -e "${RED}❌ No domain directories found in /root/cert/${NC}"
-    exit 1
-fi
+echo "📁 Installing files..."
 
-DOMAIN_NAME=$(ls /root/cert | head -n1)
-echo -e "${GREEN}✅ Found domain: $DOMAIN_NAME${NC}"
-
-# Stop existing service if running
-if systemctl is-active --quiet throughput-test; then
-    echo -e "${YELLOW}⏹️  Stopping existing throughput-test service...${NC}"
-    systemctl stop throughput-test
-fi
-
-# Copy files
-echo -e "${BLUE}📁 Installing files...${NC}"
+# Install Python script
 cp throughput_test.py /root/
 chmod +x /root/throughput_test.py
 
+# Install systemd service
 cp throughput-test.service /etc/systemd/system/
 chmod 644 /etc/systemd/system/throughput-test.service
 
+echo "🔄 Configuring systemd service..."
+
 # Reload systemd and enable service
-echo -e "${BLUE}🔄 Configuring systemd service...${NC}"
 systemctl daemon-reload
-systemctl enable throughput-test
+systemctl enable throughput-test.service
 
-# Start service
-echo -e "${BLUE}▶️  Starting throughput-test service...${NC}"
-systemctl start throughput-test
+echo "▶️  Starting throughput-test service..."
 
-# Wait a moment for service to start
-sleep 2
-
-# Check service status
-if systemctl is-active --quiet throughput-test; then
-    echo -e "${GREEN}✅ Throughput tester installed and running successfully!${NC}"
+# Start the service
+if systemctl start throughput-test.service; then
+    echo "✅ Service started successfully!"
+    echo "🌐 Server is running on port 2020"
+    echo "📋 Domain: $DOMAIN"
     echo ""
-    echo -e "${BLUE}📊 Service Information:${NC}"
-    echo "   - Service: throughput-test"
-    echo "   - Port: 2020"
-    echo "   - Domain: $DOMAIN_NAME"
-    echo "   - Test URL: https://$DOMAIN_NAME:2020"
-    echo ""
-    echo -e "${BLUE}🔧 Useful Commands:${NC}"
-    echo "   - Check status: systemctl status throughput-test"
-    echo "   - View logs: journalctl -u throughput-test -f"
-    echo "   - Restart: systemctl restart throughput-test"
-    echo "   - Stop: systemctl stop throughput-test"
-    echo ""
-    echo -e "${BLUE}🧪 Test the service:${NC}"
-    echo "   curl -I https://$DOMAIN_NAME:2020"
+    echo "📊 Check status with: systemctl status throughput-test"
+    echo "📝 View logs with: journalctl -u throughput-test -f"
 else
-    echo -e "${RED}❌ Failed to start throughput-test service${NC}"
-    echo -e "${YELLOW}🔍 Check logs with: journalctl -u throughput-test -n 20${NC}"
+    echo "❌ Failed to start throughput-test service"
+    echo "🔍 Check logs with: journalctl -u throughput-test -n 20"
     exit 1
 fi
+
+# Cleanup
+rm -rf "$TEMP_DIR"
+
+echo "🎉 Installation completed successfully!"

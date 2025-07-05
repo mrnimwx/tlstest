@@ -1,5 +1,5 @@
 [Unit]
-Description=Throughput Test HTTPS Server
+Description=Throughput Test Server
 After=network.target
 
 [Service]
@@ -8,9 +8,7 @@ User=root
 WorkingDirectory=/root
 ExecStart=/usr/bin/python3 /root/throughput_test.py
 Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
